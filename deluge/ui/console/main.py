@@ -138,7 +138,7 @@ class ConsoleUI(component.Component, TermResizeHandler):
         except ImportError:
             wrapper = None
 
-        if deluge.common.windows_check() and not wrapper:
+        if deluge.common.windows_check():
             print(
                 """\nDeluge-console does not run in interactive mode on Windows. \n
 Please use commands from the command line, e.g.:\n
@@ -148,6 +148,7 @@ deluge-console.exe "add --help"
 deluge-console.exe "add -p c:\\mytorrents c:\\new.torrent"
 """
             )
+            return
 
         # We don't ever want log output to terminal when running in
         # interactive mode, so insert a dummy here
@@ -369,10 +370,20 @@ deluge-console.exe "add -p c:\\mytorrents c:\\new.torrent"
         client.register_event_handler('TorrentAddedEvent', self.on_torrent_added)
         client.register_event_handler('TorrentRemovedEvent', self.on_torrent_removed)
 
-    @defer.inlineCallbacks
-    def on_torrent_added(self, event, from_state=False):
-        status = yield client.core.get_torrent_status(event, ['name'])
-        self.torrents.append((event, status['name']))
+    @maybe_coroutine
+    async def on_torrent_added(self, torrent_id: str, _from_state=False):
+        """Handle TorrentAddedEvent by updating the local torrent cache.
+
+        Add torrent ID immediately as a placeholder so that commands can
+        find by hash before status RPC completes, avoids race condition
+        in non-interactive (command-chain) mode.
+        """
+        placeholder = (torrent_id, torrent_id)
+        self.torrents.append(placeholder)
+        status = await client.core.get_torrent_status(torrent_id, ['name'])
+        # Replace placeholder with real name now that the RPC has completed.
+        self.torrents.remove(placeholder)
+        self.torrents.append((torrent_id, status['name']))
 
     def on_torrent_removed(self, event):
         for index, (tid, name) in enumerate(self.torrents):

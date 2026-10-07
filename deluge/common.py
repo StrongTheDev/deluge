@@ -7,6 +7,7 @@
 #
 
 """Common functions for various parts of Deluge to use."""
+
 import base64
 import binascii
 import functools
@@ -305,13 +306,8 @@ def resource_filename(module: str, path: str) -> str:
     """
     path = Path(path)
 
-    try:
-        with resources.as_file(resources.files(module) / path) as resource_file:
-            return str(resource_file)
-    except AttributeError:
-        # Python <= 3.8
-        with resources.path(module, path.parts[0]) as resource_file:
-            return str(resource_file.joinpath(*path.parts[1:]))
+    with resources.as_file(resources.files(module) / path) as resource_file:
+        return str(resource_file)
 
 
 def open_file(path, timestamp=None):
@@ -718,6 +714,16 @@ def parse_human_size(size):
     # We failed to parse the size specification.
     msg = 'Failed to parse size! (input %r was tokenized as %r)'
     raise InvalidSize(msg % (size, tokens))
+
+
+def anchorify_urls(text: str) -> str:
+    """
+    Wrap all occurrences of text URLs with HTML
+    """
+    url_pattern = r'((htt)|(ft)|(ud))ps?://\S+'
+    html_href_pattern = r'<a href="\g<0>">\g<0></a>'
+
+    return re.sub(url_pattern, html_href_pattern, text)
 
 
 def is_url(url):
@@ -1221,12 +1227,9 @@ AUTH_LEVEL_ADMIN = 10
 AUTH_LEVEL_DEFAULT = AUTH_LEVEL_NORMAL
 
 
-def create_auth_file():
+def create_auth_file(auth_file):
     import stat
 
-    import deluge.configmanager
-
-    auth_file = deluge.configmanager.get_config_dir('auth')
     # Check for auth file and create if necessary
     if not os.path.exists(auth_file):
         with open(auth_file, 'w', encoding='utf8') as _file:
@@ -1236,22 +1239,26 @@ def create_auth_file():
         os.chmod(auth_file, stat.S_IREAD | stat.S_IWRITE)
 
 
-def create_localclient_account(append=False):
+def create_localclient_account(append=False, auth_file=None):
     import random
     from hashlib import sha1 as sha
 
     import deluge.configmanager
 
-    auth_file = deluge.configmanager.get_config_dir('auth')
-    if not os.path.exists(auth_file):
-        create_auth_file()
+    if not auth_file:
+        auth_file = deluge.configmanager.get_config_dir('auth')
 
+    if not os.path.exists(auth_file):
+        create_auth_file(auth_file)
+
+    username = 'localclient'
+    password = sha(str(random.random()).encode('utf8')).hexdigest()
     with open(auth_file, 'a' if append else 'w', encoding='utf8') as _file:
         _file.write(
             ':'.join(
                 [
-                    'localclient',
-                    sha(str(random.random()).encode('utf8')).hexdigest(),
+                    username,
+                    password,
                     str(AUTH_LEVEL_ADMIN),
                 ]
             )
@@ -1259,6 +1266,7 @@ def create_localclient_account(append=False):
         )
         _file.flush()
         os.fsync(_file.fileno())
+    return username, password
 
 
 def get_localhost_auth():
@@ -1294,6 +1302,9 @@ def get_localhost_auth():
 
             if username == 'localclient':
                 return (username, password)
+
+    log.warning('Could not find localclient account in auth file.')
+    return None, None
 
 
 def set_env_variable(name, value):

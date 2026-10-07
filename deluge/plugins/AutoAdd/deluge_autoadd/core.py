@@ -292,7 +292,7 @@ class Core(CorePluginBase):
                 if 'Label' in component.get('CorePluginManager').get_enabled_plugins():
                     if watchdir.get('label_toggle', True) and watchdir.get('label'):
                         label = component.get('CorePlugin.Label')
-                        if not watchdir['label'] in label.get_labels():
+                        if watchdir['label'] not in label.get_labels():
                             label.add(watchdir['label'])
                         try:
                             label.set_torrent(torrent_id, watchdir['label'])
@@ -413,7 +413,7 @@ class Core(CorePluginBase):
         session_auth_level = self.rpcserver.get_session_auth_level()
         if session_auth_level == AUTH_LEVEL_ADMIN:
             log.debug(
-                'Current logged in user %s is an ADMIN, send all ' 'watchdirs',
+                'Current logged in user %s is an ADMIN, send all watchdirs',
                 session_user,
             )
             return self.watchdirs
@@ -424,8 +424,7 @@ class Core(CorePluginBase):
                 watchdirs[watchdir_id] = watchdir
 
         log.debug(
-            'Current logged in user %s is not an ADMIN, send only '
-            'their watchdirs: %s',
+            'Current logged in user %s is not an ADMIN, send only their watchdirs: %s',
             session_user,
             list(watchdirs),
         )

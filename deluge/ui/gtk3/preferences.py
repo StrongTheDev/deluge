@@ -13,7 +13,7 @@ from hashlib import sha1 as sha
 from urllib.parse import urlparse
 
 from gi import require_version
-from gi.repository import Gtk
+from gi.repository import GObject, Gtk
 from gi.repository.Gdk import Color
 
 import deluge.common
@@ -117,7 +117,6 @@ class Preferences(component.Component):
 
         # Setup accounts tab lisview
         self.accounts_levels_mapping = None
-        self.accounts_authlevel = self.builder.get_object('accounts_authlevel')
         self.accounts_liststore = Gtk.ListStore(str, str, str, int)
         self.accounts_liststore.set_sort_column_id(
             ACCOUNTS_USERNAME, Gtk.SortType.ASCENDING
@@ -172,6 +171,14 @@ class Preferences(component.Component):
         # Radio buttons to choose between systray and appindicator
         self.builder.get_object('alignment_tray_type').set_visible(appindicator)
 
+        # Initialize a binding for dark theme
+        Gtk.Settings.get_default().bind_property(
+            'gtk-application-prefer-dark-theme',
+            self.builder.get_object('chk_prefer_dark_theme'),
+            'active',
+            GObject.BindingFlags.BIDIRECTIONAL | GObject.BindingFlags.SYNC_CREATE,
+        )
+
         from .gtkui import DEFAULT_PREFS
 
         self.COLOR_DEFAULTS = {}
@@ -219,20 +226,20 @@ class Preferences(component.Component):
         self.language_checkbox = self.builder.get_object('checkbutton_language')
         lang_model = self.language_combo.get_model()
         langs = get_languages()
-        index = -1
-        for i, l in enumerate(langs):
-            lang_code, name = l
+        lang_idx = -1
+        for idx, lang in enumerate(langs):
+            lang_code, name = lang
             lang_model.append([lang_code, name])
             if self.gtkui_config['language'] == lang_code:
-                index = i
+                lang_idx = idx
 
         if self.gtkui_config['language'] is None:
             self.language_checkbox.set_active(True)
             self.language_combo.set_visible(False)
         else:
             self.language_combo.set_visible(True)
-            if index != -1:
-                self.language_combo.set_active(index)
+            if lang_idx != -1:
+                self.language_combo.set_active(lang_idx)
 
     def __del__(self):
         del self.gtkui_config
@@ -421,6 +428,7 @@ class Preferences(component.Component):
             'spin_seeding': ('value', 'max_active_seeding'),
             'spin_downloading': ('value', 'max_active_downloading'),
             'chk_dont_count_slow_torrents': ('active', 'dont_count_slow_torrents'),
+            'chk_announce_to_all_tiers': ('active', 'announce_to_all_tiers'),
             'chk_auto_manage_prefer_seeds': ('active', 'auto_manage_prefer_seeds'),
             'chk_queue_new_top': ('active', 'queue_new_to_top'),
             'spin_share_ratio_limit': ('value', 'share_ratio_limit'),
@@ -490,13 +498,20 @@ class Preferences(component.Component):
 
             widget.set_sensitive(self.is_connected)
 
-            if self.is_connected:
+            if self.is_connected and modifier:
                 value = core_widgets[key][1]
                 try:
                     value = self.core_config[value]
                 except KeyError:
                     if callable(value):
                         value = value()
+                    else:
+                        log.debug(
+                            'Config key %s not found in daemon config, disabling widget',
+                            key,
+                        )
+                        widget.set_sensitive(False)
+                        continue
             elif modifier:
                 value = {
                     'active': False,
@@ -557,6 +572,9 @@ class Preferences(component.Component):
         )
         self.builder.get_object('radio_thinclient').set_active(
             not self.gtkui_config['standalone']
+        )
+        self.builder.get_object('chk_prefer_dark_theme').set_active(
+            self.gtkui_config['prefer_dark_theme']
         )
         self.builder.get_object('chk_show_rate_in_title').set_active(
             self.gtkui_config['show_rate_in_title']
@@ -637,15 +655,15 @@ class Preferences(component.Component):
             'chk_move_completed'
         ).get_active()
 
-        new_core_config[
-            'download_location'
-        ] = self.download_location_path_chooser.get_text()
-        new_core_config[
-            'move_completed_path'
-        ] = self.move_completed_path_chooser.get_text()
-        new_core_config[
-            'torrentfiles_location'
-        ] = self.copy_torrent_files_path_chooser.get_text()
+        new_core_config['download_location'] = (
+            self.download_location_path_chooser.get_text()
+        )
+        new_core_config['move_completed_path'] = (
+            self.move_completed_path_chooser.get_text()
+        )
+        new_core_config['torrentfiles_location'] = (
+            self.copy_torrent_files_path_chooser.get_text()
+        )
         new_core_config['prioritize_first_last_pieces'] = self.builder.get_object(
             'chk_prioritize_first_last_pieces'
         ).get_active()
@@ -742,6 +760,9 @@ class Preferences(component.Component):
         ).get_active()
 
         # Interface tab #
+        new_gtkui_config['prefer_dark_theme'] = self.builder.get_object(
+            'chk_prefer_dark_theme'
+        ).get_active()
         new_gtkui_config['enable_system_tray'] = self.builder.get_object(
             'chk_use_tray'
         ).get_active()
@@ -835,6 +856,9 @@ class Preferences(component.Component):
         ).get_value_as_int()
         new_core_config['dont_count_slow_torrents'] = self.builder.get_object(
             'chk_dont_count_slow_torrents'
+        ).get_active()
+        new_core_config['announce_to_all_tiers'] = self.builder.get_object(
+            'chk_announce_to_all_tiers'
         ).get_active()
         new_core_config['auto_manage_prefer_seeds'] = self.builder.get_object(
             'chk_auto_manage_prefer_seeds'
@@ -943,7 +967,7 @@ class Preferences(component.Component):
             mode = _('Thinclient') if was_standalone else _('Standalone')
             dialog = YesNoDialog(
                 _('Switching Deluge Client Mode...'),
-                _('Do you want to restart to use %s mode?' % mode),
+                _('Do you want to restart to use %s mode?') % mode,
             )
             dialog.run().addCallback(on_response)
 
@@ -1075,6 +1099,10 @@ class Preferences(component.Component):
 
     def on_button_cancel_clicked(self, data):
         log.debug('on_button_cancel_clicked')
+        Gtk.Settings.get_default().set_property(
+            'gtk-application-prefer-dark-theme',
+            self.gtkui_config['prefer_dark_theme'],
+        )
         self.hide()
         return True
 
@@ -1364,7 +1392,9 @@ class Preferences(component.Component):
         except Exception as ex:
             return ErrorDialog(
                 _('Error Adding Account'),
-                _(f'An error occurred while adding account: {account}'),
+                _('An error occurred while adding account: {account}').format(
+                    account=account
+                ),
                 parent=self.pref_dialog,
                 details=ex,
             ).run()
@@ -1390,8 +1420,8 @@ class Preferences(component.Component):
 
         def dialog_finished(response_id):
             def update_ok(rc):
-                model.set_value(itr, ACCOUNTS_PASSWORD, dialog.get_username())
-                model.set_value(itr, ACCOUNTS_LEVEL, dialog.get_authlevel())
+                model.set_value(itr, ACCOUNTS_PASSWORD, dialog.account.username)
+                model.set_value(itr, ACCOUNTS_LEVEL, dialog.account.authlevel)
 
             def update_fail(failure):
                 ErrorDialog(
@@ -1403,7 +1433,9 @@ class Preferences(component.Component):
 
             if response_id == Gtk.ResponseType.OK:
                 client.core.update_account(
-                    dialog.get_username(), dialog.get_password(), dialog.get_authlevel()
+                    dialog.account.username,
+                    dialog.account.password,
+                    dialog.account.authlevel,
                 ).addCallback(update_ok).addErrback(update_fail)
 
         dialog.run().addCallback(dialog_finished)
@@ -1417,8 +1449,8 @@ class Preferences(component.Component):
         header = _('Remove Account')
         text = _(
             'Are you sure you want to remove the account with the '
-            'username "%(username)s"?' % {'username': username}
-        )
+            'username "%(username)s"?'
+        ) % {'username': username}
         dialog = YesNoDialog(header, text, parent=self.pref_dialog)
 
         def dialog_finished(response_id):

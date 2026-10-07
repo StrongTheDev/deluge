@@ -1,10 +1,84 @@
 # Changelog
 
-## 2.2.x (TBA)
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Intended Effort Versioning (EffVer)](https://jacobtomlinson.dev/effver/).
+
+## [Unreleased]
+
+### Removed
+
+- Dropped support for Python 3.8 or older. (Requires Python >= 3.10)
+
+### Core
+
+#### Added
+
+- SSL torrents support for secure peer-to-peer connections. See [libtorrent docs](https://libtorrent.org/manual-ref.html#ssl-torrents) for further implementation details.
+- Add option to announce to trackers in all tiers (uTorrent behavior). (#1395)
+
+#### Changed
+
+- Passwords are now stored encrypted with scrypt. A fallback mechanism will still validate existing plaintext passwords in auth files. (#2442)
+
+### GTK UI
+
+#### Fixed
+
+- Fix passwords being ignored in certain dialogs such as Tray Password and Connection Manager.
+
+## 2.2.0 (2025-04-28)
 
 ### Breaking changes
 
-- Python 3.6 support removed (Python >= 3.7)
+- Removed Python 3.6 support (Python >= 3.7)
+
+### Core
+
+- Fix GHSL-2024-189 - insecure HTTP for new version check.
+- Fix alert handler segfault.
+- Add support for creating v2 torrents.
+
+### GTK UI
+
+- Fix changing torrent ownership.
+- Fix upper limit of upload/download in Add Torrent dialog.
+- Fix #3339 - Resizing window crashes with Piecesbar or Stats plugin.
+- Fix #3350 - Unable to use quick search.
+- Fix #3598 - Missing AppIndicator option in Preferences.
+- Set Appindicator as default for tray icon on Linux.
+- Add feature to switch between dark/light themes.
+
+### Web UI
+
+- Fix GHSL-2024-191 - potential flag endpoint path traversal.
+- Fix GHSL-2024-188 - js script dir traversal vulnerability.
+- Fix GHSL-2024-190 - insecure tracker icon endpoint.
+- Fix unable to stop daemon in connection manager.
+- Fix responsiveness to avoid "Connection lost".
+- Add support for network interface name as well as IP address.
+- Add ability to change UI theme.
+
+### Console UI
+
+- Fix 'rm' and 'move' commands hanging when done.
+- Fix #3538 - Unable to add host in connection manager.
+- Disable interactive-mode on Windows.
+
+### UI library
+
+- Fix tracker icon display by converting to png format.
+- Fix splitting trackers by newline
+- Add clickable URLs for torrent comment and tracker status.
+
+### Label
+
+- Fix torrent deletion not removed from config.
+- Fix label display name in submenu.
+
+### AutoAdd
+
+- Fix #3515 - Torrent file decoding errors disabled watch folder.
 
 ## 2.1.1 (2022-07-10)
 

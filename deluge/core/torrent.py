@@ -1136,10 +1136,11 @@ class Torrent:
                 'download_location'
             ],  # Deprecated: Use download_location
             'download_location': lambda: self.options['download_location'],
-            'seeds_peers_ratio': lambda: -1.0
-            if self.status.num_incomplete == 0
-            else (  # Use -1.0 to signify infinity
-                self.status.num_complete / self.status.num_incomplete
+            'seeds_peers_ratio': lambda: (
+                -1.0
+                if self.status.num_incomplete == 0
+                # Use -1.0 to signify infinity
+                else (self.status.num_complete / self.status.num_incomplete)
             ),
             'seed_rank': lambda: self.status.seed_rank,
             'state': lambda: self.state,
@@ -1153,32 +1154,33 @@ class Torrent:
             'total_seeds': lambda: self.status.num_complete,
             'total_uploaded': lambda: self.status.all_time_upload,
             'total_wanted': lambda: self.status.total_wanted,
-            'total_remaining': lambda: self.status.total_wanted
-            - self.status.total_wanted_done,
+            'total_remaining': lambda: (
+                self.status.total_wanted - self.status.total_wanted_done
+            ),
             'tracker': lambda: self.status.current_tracker,
             'tracker_host': self.get_tracker_host,
             'trackers': lambda: self.trackers,
             'tracker_status': lambda: self.tracker_status,
             'upload_payload_rate': lambda: self.status.upload_payload_rate,
-            'comment': lambda: decode_bytes(self.torrent_info.comment())
-            if self.has_metadata
-            else '',
-            'creator': lambda: decode_bytes(self.torrent_info.creator())
-            if self.has_metadata
-            else '',
-            'num_files': lambda: self.torrent_info.num_files()
-            if self.has_metadata
-            else 0,
-            'num_pieces': lambda: self.torrent_info.num_pieces()
-            if self.has_metadata
-            else 0,
-            'piece_length': lambda: self.torrent_info.piece_length()
-            if self.has_metadata
-            else 0,
+            'comment': lambda: (
+                decode_bytes(self.torrent_info.comment()) if self.has_metadata else ''
+            ),
+            'creator': lambda: (
+                decode_bytes(self.torrent_info.creator()) if self.has_metadata else ''
+            ),
+            'num_files': lambda: (
+                self.torrent_info.num_files() if self.has_metadata else 0
+            ),
+            'num_pieces': lambda: (
+                self.torrent_info.num_pieces() if self.has_metadata else 0
+            ),
+            'piece_length': lambda: (
+                self.torrent_info.piece_length() if self.has_metadata else 0
+            ),
             'private': lambda: self.torrent_info.priv() if self.has_metadata else False,
-            'total_size': lambda: self.torrent_info.total_size()
-            if self.has_metadata
-            else 0,
+            'total_size': lambda: (
+                self.torrent_info.total_size() if self.has_metadata else 0
+            ),
             'eta': self.get_eta,
             'file_progress': self.get_file_progress,
             'files': self.get_files,
@@ -1273,6 +1275,56 @@ class Torrent:
             self.handle.connect_peer((peer_ip, int(peer_port)), 0)
         except (RuntimeError, ValueError) as ex:
             log.debug('Unable to connect to peer: %s', ex)
+            return False
+        return True
+
+    def set_ssl_certificate(
+        self,
+        certificate_path: str,
+        private_key_path: str,
+        dh_params_path: str,
+        password: str = '',
+    ):
+        """add a peer to the torrent
+
+        Args:
+            certificate_path(str) : Path to the PEM-encoded x509 certificate
+            private_key_path(str) : Path to the PEM-encoded private key
+            dh_params_path(str) : Path to the PEM-encoded Diffie-Hellman parameter
+            password(str) : (Optional) password used to decrypt the private key
+
+        Returns:
+            bool: True is successful, otherwise False
+        """
+        try:
+            self.handle.set_ssl_certificate(
+                certificate_path, private_key_path, dh_params_path, password
+            )
+        except RuntimeError as ex:
+            log.error('Unable to set ssl certificate from file: %s', ex)
+            return False
+        return True
+
+    def set_ssl_certificate_buffer(
+        self,
+        certificate: str,
+        private_key: str,
+        dh_params: str,
+    ):
+        """add a peer to the torrent
+
+        Args:
+            certificate(str) : PEM-encoded content of the x509 certificate
+            private_key(str) : PEM-encoded content of the private key
+            dh_params(str) : PEM-encoded content of the Diffie-Hellman parameters
+
+        Returns:
+            bool: True is successful, otherwise False
+        """
+        try:
+            self.handle.set_ssl_certificate_buffer(certificate, private_key, dh_params)
+        except RuntimeError as ex:
+            log.error('Unable to set ssl certificate from buffer: %s', ex)
             return False
         return True
 
@@ -1544,20 +1596,18 @@ class Torrent:
                 self.status.pieces, self.handle.piece_availability()
             ):
                 if piece:
-                    pieces.append(3)  # Completed.
+                    # Completed.
+                    pieces.append(3)
                 elif avail_piece:
-                    pieces.append(
-                        1
-                    )  # Available, just not downloaded nor being downloaded.
+                    # Available, just not downloaded nor being downloaded.
+                    pieces.append(1)
                 else:
-                    pieces.append(
-                        0
-                    )  # Missing, no known peer with piece, or not asked for yet.
+                    # Missing, no known peer with piece, or not asked for yet.
+                    pieces.append(0)
 
             for peer_info in self.handle.get_peer_info():
                 if peer_info.downloading_piece_index >= 0:
-                    pieces[
-                        peer_info.downloading_piece_index
-                    ] = 2  # Being downloaded from peer.
+                    # Being downloaded from peer.
+                    pieces[peer_info.downloading_piece_index] = 2
 
         return pieces

@@ -12,6 +12,7 @@ import logging
 import mimetypes
 import os
 import tempfile
+from pathlib import Path
 
 from twisted.application import internet, service
 from twisted.internet import defer, reactor
@@ -19,12 +20,13 @@ from twisted.web import http, resource, server, static
 from twisted.web.resource import EncodingResourceWrapper
 
 from deluge import common, component, configmanager
-from deluge.common import is_ipv6
+from deluge.common import AUTH_LEVEL_DEFAULT, is_ipv6
 from deluge.crypto_utils import check_ssl_keys, get_context_factory
+from deluge.error import NotAuthorizedError
 from deluge.i18n import set_language, setup_translation
 from deluge.ui.tracker_icons import TrackerIcons
 from deluge.ui.web.auth import Auth
-from deluge.ui.web.common import Template
+from deluge.ui.web.common import Template, _
 from deluge.ui.web.json_api import JSON, WebApi, WebUtils
 from deluge.ui.web.pluginmanager import PluginManager
 
@@ -181,8 +183,9 @@ class Tracker(resource.Resource):
         except KeyError:
             self.tracker_icons = TrackerIcons()
 
-    def getChild(self, path, request):  # NOQA: N802
-        request.tracker_name = path
+    def getChild(self, path: bytes, request):  # NOQA: N802
+        # Ensure tracker name only to prevent path traversal.
+        request.tracker_name = os.path.basename(path.decode())
         return self
 
     def on_got_icon(self, icon, request):
@@ -199,8 +202,22 @@ class Tracker(resource.Resource):
             request.finish()
 
     def render(self, request):
-        d = self.tracker_icons.fetch(request.tracker_name.decode())
-        d.addCallback(self.on_got_icon, request)
+        tracker_icon = self.tracker_icons.get(request.tracker_name)
+        if tracker_icon:
+            self.on_got_icon(tracker_icon, request)
+            return server.NOT_DONE_YET
+
+        # Tracker endpoint is secured to avoid exploits when downloading icons.
+        try:
+            component.get('Auth').check_request(request, level=AUTH_LEVEL_DEFAULT)
+        except NotAuthorizedError:
+            log.warning('Auth required to download tracker icon.')
+            request.setResponseCode(http.UNAUTHORIZED)
+            request.finish()
+        else:
+            self.tracker_icons.fetch(request.tracker_name).addCallback(
+                self.on_got_icon, request
+            )
         return server.NOT_DONE_YET
 
 
@@ -210,7 +227,9 @@ class Flag(resource.Resource):
         return self
 
     def render(self, request):
-        flag = request.country.decode().lower() + '.png'
+        country = request.country.decode().lower()
+        # Ensure filename only, to prevent path traversal.
+        flag = os.path.basename(f'{country}.png')
         path = ('ui', 'data', 'pixmaps', 'flags', flag)
         filename = common.resource_filename('deluge', os.path.join(*path))
         if os.path.exists(filename):
@@ -432,8 +451,18 @@ class ScriptResource(resource.Resource, component.Component):
                     filepath = filepath[0]
 
                 path = filepath + lookup_path[len(pattern) :]
+                path = os.path.abspath(path)
+
+                if not os.path.commonpath([path, filepath]) == filepath:
+                    log.warning(
+                        'Script path %s traverses out of common dir %s',
+                        path,
+                        filepath,
+                    )
+                    continue
 
                 if not os.path.isfile(path):
+                    log.warning('Unable to serve script which does not exist: %s', path)
                     continue
 
                 log.debug('Serving path: %s', path)
@@ -539,14 +568,27 @@ class TopLevel(resource.Resource):
         self.putChild(b'themes', Themes(rpath('themes')))
         self.putChild(b'tracker', Tracker())
 
-        theme = component.get('DelugeWeb').config['theme']
-        if not os.path.isfile(rpath('themes', 'css', 'xtheme-%s.css' % theme)):
-            theme = CONFIG_DEFAULTS.get('theme')
-        self.__stylesheets.insert(1, 'themes/css/xtheme-%s.css' % theme)
-
     @property
     def stylesheets(self):
         return self.__stylesheets
+
+    def get_themes(self):
+        themes_dir = Path(rpath('themes', 'css'))
+        themes = [
+            theme.stem.split('xtheme-')[1] for theme in themes_dir.glob('xtheme-*.css')
+        ]
+        themes = [(theme, _(theme.capitalize())) for theme in themes]
+        return themes
+
+    def set_theme(self, theme: str):
+        if not os.path.isfile(rpath('themes', 'css', f'xtheme-{theme}.css')):
+            theme = CONFIG_DEFAULTS.get('theme')
+        self.__theme = f'themes/css/xtheme-{theme}.css'
+
+        # Only one xtheme CSS, ordered last to override other styles.
+        if 'xtheme-' in self.stylesheets[-1]:
+            self.__stylesheets.pop()
+        self.__stylesheets.append(self.__theme)
 
     def add_script(self, script):
         """
@@ -683,6 +725,8 @@ class DelugeWeb(component.Component):
             elif options.no_ssl:
                 self.https = False
 
+        self.top_level.set_theme(self.config['theme'])
+
         setup_translation()
 
         # Remove twisted version number from 'server' http-header for security reasons
@@ -741,8 +785,8 @@ class DelugeWeb(component.Component):
     def start_normal(self):
         self.socket = reactor.listenTCP(self.port, self.site, interface=self.interface)
         ip = self.socket.getHost().host
-        ip = '[%s]' % ip if is_ipv6(ip) else ip
-        log.info('Serving at http://%s:%s%s', ip, self.port, self.base)
+        ip = f'[{ip}]' if is_ipv6(ip) else ip
+        log.info(f'Serving at http://{ip}:{self.port}{self.base}')
 
     def start_ssl(self):
         check_ssl_keys()
@@ -758,8 +802,8 @@ class DelugeWeb(component.Component):
             interface=self.interface,
         )
         ip = self.socket.getHost().host
-        ip = '[%s]' % ip if is_ipv6(ip) else ip
-        log.info('Serving at https://%s:%s%s', ip, self.port, self.base)
+        ip = f'[{ip}]' if is_ipv6(ip) else ip
+        log.info(f'Serving at https://{ip}:{self.port}{self.base}')
 
     def stop(self):
         log.info('Shutting down webserver')
@@ -788,6 +832,12 @@ class DelugeWeb(component.Component):
     def _migrate_config_1_to_2(self, config):
         config['language'] = CONFIG_DEFAULTS['language']
         return config
+
+    def get_themes(self):
+        return self.top_level.get_themes()
+
+    def set_theme(self, theme: str):
+        self.top_level.set_theme(theme)
 
 
 if __name__ == '__builtin__':

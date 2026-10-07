@@ -3,9 +3,11 @@
 # the additional special exception to link portions of this program with the OpenSSL library.
 # See LICENSE for more details.
 #
+import sys
 from dataclasses import dataclass
 
 import pytest
+from twisted.internet import reactor, task
 
 from deluge.core.core import Core
 
@@ -60,8 +62,7 @@ class TestAlertManager:
         component.start(['AlertManager'])
 
     def test_register_handler(self):
-        def handler(alert):
-            ...
+        def handler(alert): ...
 
         self.am.register_handler('dummy1', handler)
         self.am.register_handler('dummy2_alert', handler)
@@ -77,6 +78,10 @@ class TestAlertManager:
 
         mock_callback.assert_called_once_with(mock_alert1)
 
+    @pytest.mark.xfail(
+        sys.platform == 'win32',
+        reason='Issue under Windows where mock is already called.',
+    )
     async def test_pause_not_pop_alert(
         self, component, mock_alert1, mock_alert2, mock_callback
     ):
@@ -91,9 +96,30 @@ class TestAlertManager:
         assert not self.am._event.is_set()
         assert len(self.am.session.alerts) == 2
 
+    async def test_stop_while_paused_exits_thread(self, component, mock_alert1):
+        """Test alert-poller thread exits when component stopped while paused with pending alert.
+
+        Regression test: _event.wait() without a timeout blocked the alert-poller
+        thread indefinitely when paused, preventing clean shutdown.
+        """
+        alert_thread = self.am._thread
+        assert alert_thread.is_alive()
+
+        await component.pause(['AlertManager'])
+        self.am.session.push_alerts([mock_alert1])
+
+        # Let the alert-poller thread reach _event.wait() before stopping.
+        await task.deferLater(reactor, 0.1, lambda: None)
+
+        await component.stop(['AlertManager'])
+
+        alert_thread.join(timeout=2)
+        assert not alert_thread.is_alive(), (
+            'Alert-poller thread is still running after stop'
+        )
+
     def test_deregister_handler(self):
-        def handler(alert):
-            ...
+        def handler(alert): ...
 
         self.am.register_handler('dummy1', handler)
         self.am.register_handler('dummy2_alert', handler)

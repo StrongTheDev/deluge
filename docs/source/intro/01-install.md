@@ -61,7 +61,7 @@ See [Alternative Installs](#alternative-installs)
 ## <i class="icon-freebsd"></i> FreeBSD
 
 ```
-pkg add deluge
+pkg install deluge
 ```
 
 [Package details](https://www.freshports.org/net-p2p/deluge/)
@@ -80,7 +80,7 @@ Will require system installed packages such as libtorent and GTK3. See [DEPENDS]
 
 e.g. on Ubuntu/Debian install these packages:
 
-    sudo apt install python3-pip python3-libtorrent python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-appindicator3
+    sudo apt install python3-pip python3-libtorrent python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1
 
 ## Alternative Installs
 

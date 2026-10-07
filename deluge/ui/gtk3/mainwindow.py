@@ -72,6 +72,12 @@ class MainWindow(component.Component):
         self.config = ConfigManager('gtk3ui.conf')
         self.main_builder = Gtk.Builder()
 
+        # Set theme
+        Gtk.Settings.get_default().set_property(
+            'gtk-application-prefer-dark-theme',
+            self.config['prefer_dark_theme'],
+        )
+
         # Patch this GtkBuilder to avoid connecting signals from elsewhere
         #
         # Think about splitting up  mainwindow gtkbuilder file into the necessary parts
@@ -192,11 +198,11 @@ class MainWindow(component.Component):
         if self.config['lock_tray'] and not self.visible():
             dialog = PasswordDialog(_('Enter your password to show Deluge...'))
 
-            def on_dialog_response(response_id):
-                if response_id == Gtk.ResponseType.OK:
+            def on_dialog_response(password):
+                if password is not None:
                     if (
                         self.config['tray_password']
-                        == sha(decode_bytes(dialog.get_password()).encode()).hexdigest()
+                        == sha(decode_bytes(password).encode()).hexdigest()
                     ):
                         restore()
 
@@ -251,11 +257,11 @@ class MainWindow(component.Component):
         if self.config['lock_tray'] and not self.visible():
             dialog = PasswordDialog(_('Enter your password to Quit Deluge...'))
 
-            def on_dialog_response(response_id):
-                if response_id == Gtk.ResponseType.OK:
+            def on_dialog_response(password):
+                if password:
                     if (
                         self.config['tray_password']
-                        == sha(decode_bytes(dialog.get_password()).encode()).hexdigest()
+                        == sha(decode_bytes(password).encode()).hexdigest()
                     ):
                         quit_gtkui()
 

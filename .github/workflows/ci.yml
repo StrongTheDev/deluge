@@ -10,25 +10,33 @@ on:
       core-dump:
         description: "Set to 1 to enable retrieving core dump from crashes"
         default: "0"
+
+env:
+  UV_SYSTEM_PYTHON: 1
+
 jobs:
   test-linux:
     runs-on: ubuntu-22.04
+    timeout-minutes: 10
     strategy:
       matrix:
-        python-version: ["3.7", "3.10"]
+        python-version: ["3.10", "3.13"]
 
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: "pip"
-          cache-dependency-path: "requirements*.txt"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
       - name: Sets env var for security
         if: (github.event_name == 'pull_request' && contains(github.event.pull_request.body, 'security_test')) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'security_test'))
@@ -36,9 +44,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip wheel setuptools
-          pip install -r requirements-ci.txt
-          pip install -e .
+          uv pip install -r requirements-ci.txt
+          uv pip install -e .
 
       - name: Install security dependencies
         if: contains(env.SECURITY_TESTS, 'True')
@@ -61,9 +68,9 @@ jobs:
       - name: Test with pytest
         run: |
           python -c 'from deluge._libtorrent import lt; print(lt.__version__)';
-          $DEBUG_PREFIX pytest -v -m "not (todo or gtkui)" deluge
+          $DEBUG_PREFIX pytest -v -m "not (todo or gtkui or internet)" deluge
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         # capture all crashes as build artifacts
         if: failure()
         with:
@@ -72,30 +79,49 @@ jobs:
 
   test-windows:
     runs-on: windows-2022
+    timeout-minutes: 10
     strategy:
       matrix:
-        python-version: ["3.7", "3.10"]
+        python-version: ["3.10"]
 
     steps:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: "pip"
-          cache-dependency-path: "requirements*.txt"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
       - name: Install dependencies
         run: |
-          pip install --upgrade pip wheel setuptools
-          pip install -r requirements-ci.txt
-          pip install -e .
+          uv pip install -r requirements-ci.txt
+          uv pip install -e .
+
+      - name: Install OpenSSL
+        run: |
+          choco install openssl.light --version=1.1.1.20181020
+
+      - name: Patch Twisted
+        shell: bash
+        run: |
+          # Find the site-packages where Twisted source installed
+          SITE_PACKAGES=$(python -c "import sysconfig; print(sysconfig.get_path('purelib'))")
+          echo "Site packages at: $SITE_PACKAGES"
+
+          cd "$SITE_PACKAGES"
+          patch -p1 < "$GITHUB_WORKSPACE/.github/patches/twisted-glib-windows.patch"
+
+          echo "Patch applied successfully"
 
       - name: Test with pytest
         run: |
           python -c 'import libtorrent as lt; print(lt.__version__)';
-          pytest -v -m "not (todo or gtkui or security)" deluge
+          pytest -v -m "not (todo or gtkui or security or internet)" deluge

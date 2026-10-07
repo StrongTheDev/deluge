@@ -84,6 +84,7 @@ except ImportError:
 
 DEFAULT_PREFS = {
     'standalone': True,
+    'prefer_dark_theme': False,
     'interactive_add': True,
     'focus_add_dialog': True,
     'enable_system_tray': True,
@@ -323,8 +324,7 @@ class GtkUI:
                 err_msg = _(
                     'Only Thin Client mode is available due to libtorrent import error: %s\n'
                     'To use Standalone mode, please see logs for error details.'
-                    % (str(ex))
-                )
+                ) % (str(ex))
 
         except ImportError as ex:
             log.exception(ex)
